@@ -22,7 +22,8 @@ class TableClassGenerator
     private $database;
     private $file;
     private $givenTables;
-    private $parentClass;
+    private $parentModuleClass;
+    private $parentModelClass;
     private $module;
     private $model;
 
@@ -55,7 +56,8 @@ class TableClassGenerator
             echo("Tables(" . json_encode($this->givenTables) . ") in config is not an array.");
         }
 
-        $this->parentClass = $config['parentClass'];
+        $this->parentModuleClass = $config['parentModuleClass'];
+        $this->parentModelClass = $config['parentModelClass'];
 
         if ($config['excludedProperties']) {
             $this->excludedProperties = $config['excludedProperties'];
@@ -117,8 +119,8 @@ class TableClassGenerator
         echo "Generating class for table: $table.\n";
         $this->writeToFile("<?php");
 
-        if ($this->parentClass) {
-            $this->writeToFile("class {$this->module}{$table} extends {$this->parentClass}\n{");
+        if ($this->parentModuleClass) {
+            $this->writeToFile("class {$this->module}{$table} extends {$this->parentModuleClass}\n{");
         } else {
             $this->writeToFile("class {$this->module}{$table} \n{");
         }
@@ -151,18 +153,22 @@ class TableClassGenerator
         echo "Generating class for table: $table.\n";
         $this->writeToFile("<?php");
 
-        if ($this->parentClass) {
-            $this->writeToFile("class {$this->module}{$table} extends {$this->parentClass}\n{");
+        if ($this->parentModelClass) {
+            $this->writeToFile("class {$this->model}{$table} extends {$this->parentModelClass}\n{");
         } else {
-            $this->writeToFile("class {$this->module}{$table} \n{");
+            $this->writeToFile("class {$this->model}{$table} \n{");
         }
-        $this->writeToFile('private static $obj  = null;' . "\n", 1);
-        $this->writeToFile('private static $model = null;' . "\n", 1);
-        $this->generateConstruct($table);
-        $this->generateGetInstance($table);
-        $this->generateInsert();
-        $this->generateUpdate();
-        $this->generateDelete();
+
+        $this->writeToFile('private static $cache_prefix = \''. $this->model.$table.'\';', 1);
+        $this->generateModelConstruct($table);
+
+
+        $this->generateModelInsert($table);
+        $this->generateModelUpdate($table);
+        $this->generateModelDelete($table);
+
+
+
         $this->writeToFile("}");
         $this->writeNewLine();
 
@@ -186,6 +192,24 @@ class TableClassGenerator
         $this->writeNewLine();
     }
 
+    /**
+     * @desc 构造Construct
+     * @param $table
+     */
+    private function generateModelConstruct($table)
+    {
+        $this->writeToFile('/**', 1);
+        $this->writeToFile('* @desc 封闭构造', 1);
+        $this->writeToFile('*/', 1);
+        $this->writeNewLine();
+        $this->writeToFile("public function __construct() ", 1);
+        $this->writeToFile("{", 1);
+        $this->writeToFile('// 选择连接的数据库', 2);
+        $this->writeToFile("parent::_init('{$table}');", 2);
+        $this->writeToFile("}", 1);
+        $this->writeNewLine();
+
+    }
     /**
      * @desc 构造getInstance
      * @param $table
@@ -223,6 +247,59 @@ class TableClassGenerator
         $this->writeNewLine();
     }
 
+    /**
+     * @desc insert 新增
+     */
+    private function generateModelInsert($table)
+    {
+        $this->writeToFile('/**', 1);
+        $this->writeToFile('* @desc insert 新增', 1);
+        $this->writeToFile('*/', 1);
+        $this->writeToFile('public function insert($insertdata) ', 1);
+        $this->writeToFile("{", 1);
+        $this->writeToFile('$data = array();', 2);
+        $this->writeToFile('$sql = \'INSERT INTO `'.$table.'`(\';', 2);
+        $this->writeToFile(' $sql .= \'`\' . implode(\'`,`\', array_keys($insertdata)) . \'`\';', 2);
+        $this->writeToFile('$sql .= \')VALUES(:\' . implode(\',:\', array_keys($insertdata)) . \')\';', 2);
+        $this->writeToFile('foreach ($insertdata as $key => $value) {', 2);
+        $this->writeToFile('$data[\':\' . $key] = $value;', 2);
+        $this->writeToFile('$data[\':\' . $key] = $value;', 2);
+        $this->writeToFile("}", 2);
+        $this->writeToFile('return $this->dao->conn(false)->noCache()->preparedSql($sql, $data)->affectedCount();', 2);
+
+        $this->writeToFile("}", 1);
+        $this->writeNewLine();
+    }
+
+    /**
+     * @desc 更新操作
+     */
+    private function generateModelUpdate($table)
+    {
+        $this->writeToFile('/**', 1);
+        $this->writeToFile('* @desc 更新操作', 1);
+        $this->writeToFile('*/', 1);
+        $this->writeToFile('public function update($update, $id) ', 1);
+        $this->writeToFile("{", 1);
+        $this->writeToFile('$data = [];', 2);
+        $this->writeToFile(' $sql = "UPDATE ' .$table . ' SET ";', 2);
+        $this->writeToFile('$sqlarr = array();', 2);
+        $this->writeToFile('foreach ($update as $key => $value) {', 2);
+        $this->writeToFile('array_push($sqlarr, "`{$key}`=:$key");', 2);
+        $this->writeToFile('$data [":$key"] = $value;', 2);
+        $this->writeToFile("}", 2);
+        $this->writeToFile('$sql .= implode(\',\', $sqlarr);', 2);
+        $this->writeToFile('$sql .= " WHERE uid=:id";', 2);
+        $this->writeToFile('$data[\':id\'] = $id;', 2);
+        $this->writeToFile('$res = $this->dao->conn(false)->noCache()->preparedSql($sql, $data)->affectedCount();', 2);
+        $this->writeToFile('$this->dao->clearTag(self::$cache_prefix);', 2);
+        $this->writeToFile('return $res;', 2);
+
+        $this->writeToFile("}", 1);
+        $this->writeNewLine();
+
+    }
+
 
     /**
      * @desc 更新操作
@@ -250,6 +327,23 @@ class TableClassGenerator
         $this->writeToFile('public function del($id) ', 1);
         $this->writeToFile("{", 1);
         $this->writeToFile('return $this->model->del($id);', 2);
+        $this->writeToFile("}", 1);
+        $this->writeNewLine();
+    }   /**
+     * @del delete删除
+     */
+    private function generateModelDelete($table)
+    {
+        $this->writeToFile('/**', 1);
+        $this->writeToFile('* delete删除', 1);
+        $this->writeToFile('*/', 1);
+        $this->writeToFile('public function delete($id) ', 1);
+        $this->writeToFile("{", 1);
+        $this->writeToFile('$sql = \'DELETE FROM `'.$table.'` WHERE `id`=:id\';', 2);
+        $this->writeToFile('$data = array(', 2);
+        $this->writeToFile('\':id\'=> $id', 2);
+        $this->writeToFile(');', 2);
+        $this->writeToFile(' return $this->dao->conn(false)->noCache()->preparedSql($sql, $data)->affectedCount();', 2);
         $this->writeToFile("}", 1);
         $this->writeNewLine();
     }
@@ -311,7 +405,8 @@ $gen = new TableClassGenerator(array(
     'database' => 'test',
     'host' => '192.168.9.102',
     'port' => '3357',
-    'parentClass' => 'TyModule_BaseModule',
+    'parentModuleClass' => 'TyModule_BaseModule',
+    'parentModelClass' => 'TyModule_BaseModel',
     'password' => '123456',
     'tables' => array(),
     'user' => 'wdty',
